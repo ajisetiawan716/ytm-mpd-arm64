@@ -37,10 +37,20 @@ jobs:
               
           WORKDIR /app
           COPY package*.json ./
-          RUN npm ci
+          
+          # Hapus package-lock lama agar kita bisa menginstal versi terbaru
+          RUN rm -f package-lock.json
+          
+          # Paksa perbarui library YouTube agar signature deciphering kembali normal
+          RUN npm install youtubei.js@latest yt-cast-receiver@latest
+          
+          # Instal sisa paket lainnya
+          RUN npm install
+          
           COPY . .
           RUN npm run build
           CMD ["node", "dist/index.js"]
+
           EOF
 
       - name: Set up QEMU for ARM64
