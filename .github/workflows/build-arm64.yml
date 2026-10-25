@@ -19,9 +19,12 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      # Unduh source code asli ytm-mpd untuk dibuild menjadi ARM64
-      - name: Clone ytm-mpd Source Code
-        run: git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
+      # CLONE DAN PERBAIKI BUG QEMU ALPINE
+      - name: Clone ytm-mpd Source Code & Fix QEMU Bug
+        run: |
+          git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
+          # Mengubah image node:alpine menjadi node:bookworm-slim agar npm ci tidak crash
+          sed -i 's/alpine/bookworm-slim/g' ./ytm-mpd-src/Dockerfile
 
       - name: Set up QEMU for ARM64
         uses: docker/setup-qemu-action@v3
@@ -36,7 +39,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build dan Push ytm-mpd (ARM64)
       - name: Build and Push ytm-mpd (ARM64)
         uses: docker/build-push-action@v6
         with:
@@ -45,7 +47,6 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.OWNER }}/ytm-mpd:arm64
 
-      # Build dan Push mpd kustom dari file Dockerfile.mpd dan mpd.conf Anda sendiri
       - name: Build and Push mpd (ARM64)
         uses: docker/build-push-action@v6
         with:
@@ -54,3 +55,4 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ghcr.io/${{ env.OWNER }}/mpd-alpine:arm64
+          
