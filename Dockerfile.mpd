@@ -1,0 +1,12 @@
+FROM alpine:latest
+
+# Install mpd, mpc, dukungan alsa, dan encoder audio
+RUN apk add --no-cache mpd mpc alsa-lib lame
+
+# Salin konfigurasi kustom ke dalam image
+COPY mpd.conf /etc/mpd.conf
+
+EXPOSE 6600 8000
+
+# Buat direktori data saat dijalankan dan eksekusi mpd
+CMD ["sh", "-c", "mkdir -p /var/lib/mpd/data/playlists && exec mpd --no-daemon /etc/mpd.conf"]
