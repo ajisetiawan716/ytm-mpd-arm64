@@ -1,7 +1,7 @@
 FROM alpine:latest
 
 # Install mpd, mpc, dukungan alsa, dan encoder audio
-RUN apk add --no-cache mpd mpc alsa-lib lame
+RUN apk add --no-cache mpd mpc alsa-lib lame yt-dlp
 
 # Salin konfigurasi kustom ke dalam image
 COPY mpd.conf /etc/mpd.conf
