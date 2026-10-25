@@ -19,12 +19,21 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      # CLONE DAN PERBAIKI BUG QEMU ALPINE
-      - name: Clone ytm-mpd Source Code & Fix QEMU Bug
+      - name: Clone ytm-mpd & Rewrite Dockerfile for Debian
         run: |
           git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
-          # Mengubah image node:alpine menjadi node:bookworm-slim agar npm ci tidak crash
-          sed -i 's/alpine/bookworm-slim/g' ./ytm-mpd-src/Dockerfile
+          
+          # Timpa Dockerfile bawaan dengan versi Debian (bookworm) yang stabil di QEMU
+          cat << 'EOF' > ./ytm-mpd-src/Dockerfile
+          FROM node:lts-bookworm-slim
+          RUN apt-get update && apt-get install -y git python3 make g++ && rm -rf /var/lib/apt/lists/*
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci
+          COPY . .
+          RUN npm run build
+          CMD ["node", "dist/index.js"]
+          EOF
 
       - name: Set up QEMU for ARM64
         uses: docker/setup-qemu-action@v3
