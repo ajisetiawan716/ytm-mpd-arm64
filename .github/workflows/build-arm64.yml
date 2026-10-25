@@ -19,14 +19,22 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Clone ytm-mpd & Rewrite Dockerfile for Debian
+      - name: Clone ytm-mpd & Rewrite Dockerfile for Debian + yt-dlp
         run: |
           git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
           
-          # Timpa Dockerfile bawaan dengan versi Debian (bookworm) yang stabil di QEMU
+          # Timpa Dockerfile bawaan dengan versi Debian (bookworm) dan instal yt-dlp
           cat << 'EOF' > ./ytm-mpd-src/Dockerfile
           FROM node:lts-bookworm-slim
-          RUN apt-get update && apt-get install -y git python3 make g++ yt-dlp && rm -rf /var/lib/apt/lists/*
+          
+          # Instal dependencies yang dibutuhkan
+          RUN apt-get update && apt-get install -y git python3 make g++ curl wget && rm -rf /var/lib/apt/lists/*
+          
+          # Unduh yt-dlp dan buat symlink sebagai youtube-dl
+          RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+              chmod a+rx /usr/local/bin/yt-dlp && \
+              ln -s /usr/local/bin/yt-dlp /usr/local/bin/youtube-dl
+              
           WORKDIR /app
           COPY package*.json ./
           RUN npm ci
