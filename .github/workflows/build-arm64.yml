@@ -31,7 +31,6 @@ jobs:
           let indexCode = fs.readFileSync(indexFile, 'utf8');
           const antiCrash = `\nprocess.on('uncaughtException', (err) => console.log('Ignored Error:', err.message));\nprocess.on('unhandledRejection', (err) => console.log('Ignored Promise:', err));\n`;
           
-          // Pastikan kode anti-crash disisipkan SETELAH shebang (#!/bin/node) agar TypeScript tidak error
           if (indexCode.startsWith('#!')) {
               const firstLineEnd = indexCode.indexOf('\n');
               indexCode = indexCode.slice(0, firstLineEnd) + antiCrash + indexCode.slice(firstLineEnd);
@@ -117,6 +116,8 @@ jobs:
           RUN rm -f package-lock.json && npm install youtubei.js@latest yt-cast-receiver@latest
           RUN npm install
           COPY . .
+          # Buat direktori penyimpanan persisten
+          RUN mkdir -p /app/.node-persist/storage && chmod -R 777 /app/.node-persist
           RUN npm run build
           CMD ["node", "dist/index.js"]
           EOF
@@ -141,3 +142,4 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ghcr.io/${{ env.OWNER }}/ytm-mpd:arm64
+          
