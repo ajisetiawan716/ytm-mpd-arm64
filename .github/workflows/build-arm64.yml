@@ -19,68 +19,86 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Clone ytm-mpd, Apply Patches & Build
+      - name: Clone ytm-mpd, Rewrite doPlay & Build
         run: |
           git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
           
-          # Injeksi Patch menggunakan Node.js
           cat << 'PATCH_EOF' > patch.js
           const fs = require('fs');
           const file = './ytm-mpd-src/src/player/MpdPlayer.ts';
           let code = fs.readFileSync(file, 'utf8');
           
-          // 1. Modifikasi yt-dlp agar mengeluarkan format stream yang mendukung fitur seek
-          code = code.replace(/yt-dlp -f bestaudio\[ext=m4a\]/g, 'yt-dlp -f bestaudio -g --format-sort res,abr');
+          // Regex untuk menemukan blok fungsi doPlay bawaan
+          const doPlayRegex = /protected async doPlay\([\s\S]*?return true;\s*\n*\s*\}/m;
           
-          // 2. Injeksi Metadata Judul dan Artis dengan yt-dlp (Bypass TypeScript)
-          const target = "await this.client.api.queue.add(audioUrl);";
-          const replacement = `await this.client.api.queue.add(audioUrl);
-          try {
-              const qStatus = await this.client.api.status.get() as any;
-              const songPos = qStatus.playlistlength ? (parseInt(qStatus.playlistlength) - 1) : 0;
-              const songInfo = await this.client.sendCommand("playlistinfo " + songPos);
-              const idMatch = songInfo.match(/Id: (\\d+)/);
-              if(idMatch && idMatch[1]) {
-                  const songId = idMatch[1];
-                  const exec = require('child_process').exec;
-                  const targetUrl = "https://www.youtube.com/watch?v=" + (video as any).id;
-                  exec('yt-dlp --print "%(title)s|%(channel)s" "' + targetUrl + '"', async (err: any, stdout: any) => {
-                      if(!err && stdout) {
-                          const parts = String(stdout).trim().split('|');
-                          const title = parts[0] ? parts[0].replace(/"/g, '') : 'YouTube Audio';
-                          const artist = parts[1] ? parts[1].replace(/"/g, '') : 'YouTube';
-                          await this.client.sendCommand("addtagid " + songId + ' Title "' + title + '"');
-                          await this.client.sendCommand("addtagid " + songId + ' Artist "' + artist + '"');
-                      }
-                  });
+          // Tulis ulang seluruh fungsi doPlay agar mengekstrak URL dan Metadata secara bersamaan
+          const newDoPlay = `protected async doPlay(video: any, position: number): Promise<boolean> {
+              console.log("Play " + video.id + " at position " + position + "s");
+              this.lastPlayBackCommand = 'NOTHING';
+              
+              let audioUrl = "";
+              let title = "YouTube Audio";
+              let artist = "YouTube";
+              
+              try {
+                  const util = require('util');
+                  const execAsync = util.promisify(require('child_process').exec);
+                  // Gunakan yt-dlp untuk menarik URL, Judul, dan Channel sekaligus dengan pemisah _||_
+                  const cmd = 'yt-dlp -f bestaudio --format-sort res,abr --print "%(url)s_||_%(title)s_||_%(channel)s" "https://www.youtube.com/watch?v=' + video.id + '"';
+                  const { stdout } = await execAsync(cmd);
+                  const parts = stdout.trim().split('_||_');
+                  
+                  if (parts.length >= 3) {
+                      audioUrl = parts[0];
+                      title = parts[1].replace(/"/g, '\\"');
+                      artist = parts[2].replace(/"/g, '\\"');
+                  } else {
+                      audioUrl = await (this as any).getAudioUrl(video);
+                  }
+              } catch (e) {
+                  console.log("Metadata Fetch Error: " + (e as any).message);
+                  audioUrl = await (this as any).getAudioUrl(video);
               }
-          } catch(e) {
-              console.log("Gagal injeksi tag: " + (e as any).message);
+
+              await this.client.api.queue.clear();
+              await this.client.api.queue.add(audioUrl);
+              
+              try {
+                  const qStatus = await this.client.api.status.get() as any;
+                  const songPos = qStatus.playlistlength ? (parseInt(qStatus.playlistlength) - 1) : 0;
+                  const songInfo = await this.client.sendCommand("playlistinfo " + songPos);
+                  const idMatch = songInfo.match(/Id: (\\d+)/);
+                  if(idMatch && idMatch[1]) {
+                      const songId = idMatch[1];
+                      await this.client.sendCommand("addtagid " + songId + ' Title "' + title + '"');
+                      await this.client.sendCommand("addtagid " + songId + ' Artist "' + artist + '"');
+                  }
+              } catch(e) {
+                  console.log("Tag inject error: " + (e as any).message);
+              }
+
+              await this.client.api.playback.play();
+              await this.client.api.playback.seekcur(position.toString());
+              this.lastPlayBackCommand = 'PLAY';
+              return true;
           }`;
           
-          code = code.replace(target, replacement);
+          code = code.replace(doPlayRegex, newDoPlay);
           fs.writeFileSync(file, code);
           PATCH_EOF
           
-          # Eksekusi patch
           node patch.js
           
-          # Pembuatan Dockerfile
           cat << 'EOF' > ./ytm-mpd-src/Dockerfile
           FROM node:lts-bookworm-slim
-          
           RUN apt-get update && apt-get install -y git python3 make g++ curl wget && rm -rf /var/lib/apt/lists/*
-          
           RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
               chmod a+rx /usr/local/bin/yt-dlp && \
               ln -s /usr/local/bin/yt-dlp /usr/local/bin/youtube-dl
-              
           WORKDIR /app
           COPY package*.json ./
-          
           RUN rm -f package-lock.json && npm install youtubei.js@latest yt-cast-receiver@latest
           RUN npm install
-          
           COPY . .
           RUN npm run build
           CMD ["node", "dist/index.js"]
