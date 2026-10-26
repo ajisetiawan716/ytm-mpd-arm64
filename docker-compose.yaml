@@ -1,6 +1,6 @@
 services:
   yt-mpd:
-    image: ghcr.io/USERNAME_ANDA/ytm-mpd:arm64
+    image: ghcr.io/ajisetiawan716/ytm-mpd:arm64
     container_name: yt-mpd
     network_mode: 'host'
     restart: unless-stopped
@@ -8,19 +8,5 @@ services:
       - MPD_HOST=127.0.0.1
       - MPD_PORT=6600
       - MPD_PASSWORD=
-    depends_on:
-      - mpd
-
-  mpd:
-    image: ghcr.io/USERNAME_ANDA/mpd-alpine:arm64
-    container_name: mpd
-    restart: unless-stopped
-    ports:
-      - 6600:6600  # MPD Client
-      - 8000:8000  # Stream
     volumes:
-      - ./mpd-data:/var/lib/mpd/data:rw
-    # Nonaktifkan (beri tanda #) pada /dev/snd jika perangkat tidak punya soundcard
-    devices:
-      - "/dev/snd:/dev/snd"
-      
+      - ./data:/app/.node-persist
