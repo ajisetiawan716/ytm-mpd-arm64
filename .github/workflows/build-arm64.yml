@@ -19,19 +19,25 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Clone ytm-mpd, Rewrite doPlay & Build
+      - name: Clone ytm-mpd, Apply Patches & Build
         run: |
           git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
           
           cat << 'PATCH_EOF' > patch.js
           const fs = require('fs');
+          
+          // --- PATCH 1: Anti-Crash untuk Standby (index.ts) ---
+          const indexFile = './ytm-mpd-src/src/index.ts';
+          let indexCode = fs.readFileSync(indexFile, 'utf8');
+          const antiCrash = `process.on('uncaughtException', (err) => console.log('Ignored Error:', err.message));\nprocess.on('unhandledRejection', (err) => console.log('Ignored Promise:', err));\n`;
+          fs.writeFileSync(indexFile, antiCrash + indexCode);
+
+          // --- PATCH 2: Injeksi Metadata Tag & yt-dlp (MpdPlayer.ts) ---
           const file = './ytm-mpd-src/src/player/MpdPlayer.ts';
           let code = fs.readFileSync(file, 'utf8');
           
-          // Regex untuk menemukan blok fungsi doPlay bawaan
           const doPlayRegex = /protected async doPlay\([\s\S]*?return true;\s*\n*\s*\}/m;
           
-          // Tulis ulang seluruh fungsi doPlay tanpa menggunakan require()
           const newDoPlay = `protected async doPlay(video: any, position: number): Promise<boolean> {
               console.log("Play " + video.id + " at position " + position + "s");
               this.lastPlayBackCommand = 'NOTHING';
@@ -41,18 +47,16 @@ jobs:
               let artist = "YouTube";
               
               try {
-                  // Gunakan exec() yang sudah di-import di awal file MpdPlayer.ts
                   const cmd = 'yt-dlp -f bestaudio --format-sort res,abr --print "%(url)s_||_%(title)s_||_%(channel)s" "https://www.youtube.com/watch?v=' + video.id + '"';
                   
                   const stdout = await new Promise<string>((resolve, reject) => {
-                      exec(cmd, (err, stdout, stderr) => {
+                      exec(cmd, (err, stdout) => {
                           if(err) reject(err);
                           else resolve(stdout);
                       });
                   });
                   
                   const parts = stdout.trim().split('_||_');
-                  
                   if (parts.length >= 3) {
                       audioUrl = parts[0];
                       title = parts[1].replace(/"/g, '\\"');
@@ -129,4 +133,3 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ghcr.io/${{ env.OWNER }}/ytm-mpd:arm64
-          
