@@ -1,4 +1,4 @@
-name: Build ARM64 Images
+name: Build yt-mpd ARM64 Image
 
 on:
   push:
@@ -19,18 +19,51 @@ jobs:
       - name: Set Lowercase Owner Name
         run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Clone ytm-mpd & Rewrite Dockerfile for Debian + yt-dlp
+      - name: Clone ytm-mpd, Apply Patches & Build
         run: |
           git clone https://github.com/dgalli1/ytm-mpd.git ./ytm-mpd-src
           
-          # Timpa Dockerfile bawaan dengan versi Debian (bookworm) dan instal yt-dlp
+          # Injeksi Patch menggunakan Node.js
+          cat << 'PATCH_EOF' > patch.js
+          const fs = require('fs');
+          const file = './ytm-mpd-src/src/player/MpdPlayer.ts';
+          let code = fs.readFileSync(file, 'utf8');
+          
+          // 1. Modifikasi yt-dlp agar mengeluarkan format stream yang mendukung fungsi seek (anti-hang)
+          code = code.replace(/yt-dlp -f bestaudio\[ext=m4a\]/g, 'yt-dlp -f bestaudio -g --format-sort res,abr');
+          
+          // 2. Injeksi Metadata Judul dan Artis ke MPD
+          const target = "await this.client.api.queue.add(audioUrl);";
+          const replacement = `await this.client.api.queue.add(audioUrl);
+          try {
+              const qStatus = await this.client.api.status.get();
+              const songPos = qStatus.playlistlength ? (parseInt(qStatus.playlistlength) - 1) : 0;
+              const songInfo = await this.client.sendCommand(\`playlistinfo \${songPos}\`);
+              const idMatch = songInfo.match(/Id: (\\d+)/);
+              if(idMatch && idMatch[1]) {
+                  const songId = idMatch[1];
+                  const title = video.title ? video.title.replace(/"/g, '\\\\"') : 'YouTube Audio';
+                  const artist = video.author ? video.author.replace(/"/g, '\\\\"') : 'YouTube';
+                  await this.client.sendCommand(\`addtagid \${songId} Title "\${title}"\`);
+                  await this.client.sendCommand(\`addtagid \${songId} Artist "\${artist}"\`);
+              }
+          } catch(e) {
+              console.log("Gagal injeksi tag: " + e.message);
+          }`;
+          
+          code = code.replace(target, replacement);
+          fs.writeFileSync(file, code);
+          PATCH_EOF
+          
+          # Eksekusi patch
+          node patch.js
+          
+          # Pembuatan Dockerfile (Debian + yt-dlp + Pembaruan Library YouTube)
           cat << 'EOF' > ./ytm-mpd-src/Dockerfile
           FROM node:lts-bookworm-slim
           
-          # Instal dependencies yang dibutuhkan
           RUN apt-get update && apt-get install -y git python3 make g++ curl wget && rm -rf /var/lib/apt/lists/*
           
-          # Unduh yt-dlp dan buat symlink sebagai youtube-dl
           RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
               chmod a+rx /usr/local/bin/yt-dlp && \
               ln -s /usr/local/bin/yt-dlp /usr/local/bin/youtube-dl
@@ -38,19 +71,13 @@ jobs:
           WORKDIR /app
           COPY package*.json ./
           
-          # Hapus package-lock lama agar kita bisa menginstal versi terbaru
-          RUN rm -f package-lock.json
-          
-          # Paksa perbarui library YouTube agar signature deciphering kembali normal
-          RUN npm install youtubei.js@latest yt-cast-receiver@latest
-          
-          # Instal sisa paket lainnya
+          # Paksa perbarui dependensi agar sinkron dengan algoritma YouTube terbaru
+          RUN rm -f package-lock.json && npm install youtubei.js@latest yt-cast-receiver@latest
           RUN npm install
           
           COPY . .
           RUN npm run build
           CMD ["node", "dist/index.js"]
-
           EOF
 
       - name: Set up QEMU for ARM64
@@ -66,20 +93,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push ytm-mpd (ARM64)
+      - name: Build and Push yt-mpd (ARM64)
         uses: docker/build-push-action@v6
         with:
           context: ./ytm-mpd-src
           platforms: linux/arm64
           push: true
           tags: ghcr.io/${{ env.OWNER }}/ytm-mpd:arm64
-
-      - name: Build and Push mpd (ARM64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.mpd
-          platforms: linux/arm64
-          push: true
-          tags: ghcr.io/${{ env.OWNER }}/mpd-alpine:arm64
           
