@@ -29,26 +29,27 @@ jobs:
           const file = './ytm-mpd-src/src/player/MpdPlayer.ts';
           let code = fs.readFileSync(file, 'utf8');
           
-          // 1. Modifikasi yt-dlp agar mengeluarkan format stream yang mendukung fungsi seek (anti-hang)
+          // 1. Modifikasi format yt-dlp agar mendukung fitur seek
           code = code.replace(/yt-dlp -f bestaudio\[ext=m4a\]/g, 'yt-dlp -f bestaudio -g --format-sort res,abr');
           
-          // 2. Injeksi Metadata Judul dan Artis ke MPD
+          // 2. Injeksi Metadata Judul dan Artis (Bypass TypeScript Strict Typing)
           const target = "await this.client.api.queue.add(audioUrl);";
           const replacement = `await this.client.api.queue.add(audioUrl);
           try {
-              const qStatus = await this.client.api.status.get();
+              const qStatus = await this.client.api.status.get() as any;
               const songPos = qStatus.playlistlength ? (parseInt(qStatus.playlistlength) - 1) : 0;
-              const songInfo = await this.client.sendCommand(\`playlistinfo \${songPos}\`);
+              const songInfo = await this.client.sendCommand("playlistinfo " + songPos);
               const idMatch = songInfo.match(/Id: (\\d+)/);
               if(idMatch && idMatch[1]) {
                   const songId = idMatch[1];
-                  const title = video.title ? video.title.replace(/"/g, '\\\\"') : 'YouTube Audio';
-                  const artist = video.author ? video.author.replace(/"/g, '\\\\"') : 'YouTube';
-                  await this.client.sendCommand(\`addtagid \${songId} Title "\${title}"\`);
-                  await this.client.sendCommand(\`addtagid \${songId} Artist "\${artist}"\`);
+                  const v = video as any;
+                  const title = v.title ? String(v.title).replace(/"/g, '') : 'YouTube Audio';
+                  const artist = v.author ? String(v.author).replace(/"/g, '') : 'YouTube';
+                  await this.client.sendCommand("addtagid " + songId + ' Title "' + title + '"');
+                  await this.client.sendCommand("addtagid " + songId + ' Artist "' + artist + '"');
               }
           } catch(e) {
-              console.log("Gagal injeksi tag: " + e.message);
+              console.log("Gagal injeksi tag: " + (e as any).message);
           }`;
           
           code = code.replace(target, replacement);
@@ -58,7 +59,7 @@ jobs:
           # Eksekusi patch
           node patch.js
           
-          # Pembuatan Dockerfile (Debian + yt-dlp + Pembaruan Library YouTube)
+          # Pembuatan Dockerfile
           cat << 'EOF' > ./ytm-mpd-src/Dockerfile
           FROM node:lts-bookworm-slim
           
@@ -71,7 +72,6 @@ jobs:
           WORKDIR /app
           COPY package*.json ./
           
-          # Paksa perbarui dependensi agar sinkron dengan algoritma YouTube terbaru
           RUN rm -f package-lock.json && npm install youtubei.js@latest yt-cast-receiver@latest
           RUN npm install
           
