@@ -29,10 +29,10 @@ jobs:
           const file = './ytm-mpd-src/src/player/MpdPlayer.ts';
           let code = fs.readFileSync(file, 'utf8');
           
-          // 1. Modifikasi format yt-dlp agar mendukung fitur seek
+          // 1. Modifikasi yt-dlp agar mengeluarkan format stream yang mendukung fitur seek
           code = code.replace(/yt-dlp -f bestaudio\[ext=m4a\]/g, 'yt-dlp -f bestaudio -g --format-sort res,abr');
           
-          // 2. Injeksi Metadata Judul dan Artis (Bypass TypeScript Strict Typing)
+          // 2. Injeksi Metadata Judul dan Artis dengan yt-dlp (Bypass TypeScript)
           const target = "await this.client.api.queue.add(audioUrl);";
           const replacement = `await this.client.api.queue.add(audioUrl);
           try {
@@ -42,11 +42,17 @@ jobs:
               const idMatch = songInfo.match(/Id: (\\d+)/);
               if(idMatch && idMatch[1]) {
                   const songId = idMatch[1];
-                  const v = video as any;
-                  const title = v.title ? String(v.title).replace(/"/g, '') : 'YouTube Audio';
-                  const artist = v.author ? String(v.author).replace(/"/g, '') : 'YouTube';
-                  await this.client.sendCommand("addtagid " + songId + ' Title "' + title + '"');
-                  await this.client.sendCommand("addtagid " + songId + ' Artist "' + artist + '"');
+                  const exec = require('child_process').exec;
+                  const targetUrl = "https://www.youtube.com/watch?v=" + (video as any).id;
+                  exec('yt-dlp --print "%(title)s|%(channel)s" "' + targetUrl + '"', async (err: any, stdout: any) => {
+                      if(!err && stdout) {
+                          const parts = String(stdout).trim().split('|');
+                          const title = parts[0] ? parts[0].replace(/"/g, '') : 'YouTube Audio';
+                          const artist = parts[1] ? parts[1].replace(/"/g, '') : 'YouTube';
+                          await this.client.sendCommand("addtagid " + songId + ' Title "' + title + '"');
+                          await this.client.sendCommand("addtagid " + songId + ' Artist "' + artist + '"');
+                      }
+                  });
               }
           } catch(e) {
               console.log("Gagal injeksi tag: " + (e as any).message);
